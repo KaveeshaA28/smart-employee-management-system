@@ -1,18 +1,21 @@
 /**
  * Auth Controller
  * ============================================================
- * Handles: Register, Login, Logout, Profile, Token Refresh
+ * Handles: Register, Login, Logout, Profile, Password Reset, Email Verification
  *
  * Business Rules:
- * - Only Admin can register new users
+ * - Only Admin can register users with elevated roles (HR/Manager/Admin)
+ * - Public register defaults to 'Employee' role
  * - JWT tokens expire after 8h
  * - Session tracking on login/logout
+ * - Account locks after 5 failed login attempts (15 min lock)
  */
 
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const Employee = require('../models/Employee');
 const { startSession, endSession } = require('../utils/sessionTracker');
-const { sendWelcomeEmail } = require('../services/emailService');
+const { sendWelcomeEmail, sendPasswordResetEmail, sendVerificationEmail } = require('../services/emailService');
 
 // ─── Helper: Generate JWT ──────────────────────────────────────────────────────
 const generateToken = (id) => {
@@ -35,12 +38,13 @@ const formatEmployee = (emp) => ({
   status: emp.status,
   avatar: emp.avatar,
   lastLogin: emp.lastLogin,
+  isEmailVerified: emp.isEmailVerified,
 });
 
 /**
  * @desc    Register a new employee/user
  * @route   POST /api/auth/register
- * @access  Private - Admin only
+ * @access  Public (defaults to Employee role) | Private-Admin (can set role)
  */
 const register = async (req, res, next) => {
   try {
@@ -135,15 +139,36 @@ const login = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
+    // Check if account is locked due to too many failed attempts
+    if (employee.isLocked()) {
+      const waitMinutes = Math.ceil((employee.lockUntil - Date.now()) / 60000);
+      return res.status(423).json({
+        success: false,
+        message: `Account locked due to too many failed attempts. Try again in ${waitMinutes} minute(s).`,
+      });
+    }
+
     // Check password
     const isMatch = await employee.comparePassword(password);
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+      await employee.incrementLoginAttempts();
+      const attemptsLeft = 5 - (employee.loginAttempts + 1);
+      return res.status(401).json({
+        success: false,
+        message: attemptsLeft > 0
+          ? `Invalid email or password. ${attemptsLeft} attempt(s) remaining.`
+          : 'Account locked due to too many failed attempts. Try again in 15 minutes.',
+      });
     }
 
     // Check account status
     if (employee.status === 'Terminated' || employee.status === 'Inactive') {
       return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact HR.' });
+    }
+
+    // Reset failed login attempts on success
+    if (employee.loginAttempts > 0) {
+      await employee.resetLoginAttempts();
     }
 
     // Start session tracking
@@ -301,4 +326,157 @@ const uploadAvatar = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, logout, getMe, updateProfile, changePassword, uploadAvatar };
+/**
+ * @desc    Request password reset (sends email with reset link)
+ * @route   POST /api/auth/forgot-password
+ * @access  Public
+ */
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required.' });
+    }
+
+    const employee = await Employee.findOne({ email, isDeleted: false });
+
+    // Always return success — never reveal whether the email exists (security best practice)
+    if (!employee) {
+      return res.status(200).json({
+        success: true,
+        message: 'If an account with that email exists, a reset link has been sent.',
+      });
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    employee.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    employee.resetPasswordExpire = Date.now() + 30 * 60 * 1000; // 30 minutes
+    await employee.save({ validateBeforeSave: false });
+
+    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password/${resetToken}`;
+
+    try {
+      await sendPasswordResetEmail(employee, resetUrl);
+      res.status(200).json({
+        success: true,
+        message: 'Password reset link sent to your email.',
+      });
+    } catch (emailError) {
+      employee.resetPasswordToken = undefined;
+      employee.resetPasswordExpire = undefined;
+      await employee.save({ validateBeforeSave: false });
+      console.error('Email send failed:', emailError);
+      return res.status(500).json({ success: false, message: 'Failed to send reset email. Please try again later.' });
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Reset password using token from email
+ * @route   PUT /api/auth/reset-password/:token
+ * @access  Public
+ */
+const resetPassword = async (req, res, next) => {
+  try {
+    const { token } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 8 characters.' });
+    }
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const employee = await Employee.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpire: { $gt: Date.now() },
+    });
+
+    if (!employee) {
+      return res.status(400).json({ success: false, message: 'Reset link is invalid or has expired.' });
+    }
+
+    employee.password = newPassword;
+    employee.resetPasswordToken = undefined;
+    employee.resetPasswordExpire = undefined;
+    await employee.save();
+
+    res.status(200).json({ success: true, message: 'Password reset successful. Please log in with your new password.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Send email verification link to the logged-in user
+ * @route   POST /api/auth/send-verification
+ * @access  Private
+ */
+const sendVerification = async (req, res, next) => {
+  try {
+    const employee = await Employee.findById(req.user._id);
+
+    if (employee.isEmailVerified) {
+      return res.status(400).json({ success: false, message: 'Email is already verified.' });
+    }
+
+    const verifyToken = crypto.randomBytes(32).toString('hex');
+    employee.emailVerificationToken = crypto.createHash('sha256').update(verifyToken).digest('hex');
+    employee.emailVerificationExpire = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+    await employee.save({ validateBeforeSave: false });
+
+    const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email/${verifyToken}`;
+    await sendVerificationEmail(employee, verifyUrl);
+
+    res.status(200).json({ success: true, message: 'Verification email sent.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Verify email using token from email link
+ * @route   GET /api/auth/verify-email/:token
+ * @access  Public
+ */
+const verifyEmail = async (req, res, next) => {
+  try {
+    const { token } = req.params;
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const employee = await Employee.findOne({
+      emailVerificationToken: hashedToken,
+      emailVerificationExpire: { $gt: Date.now() },
+    });
+
+    if (!employee) {
+      return res.status(400).json({ success: false, message: 'Verification link is invalid or has expired.' });
+    }
+
+    employee.isEmailVerified = true;
+    employee.emailVerificationToken = undefined;
+    employee.emailVerificationExpire = undefined;
+    await employee.save({ validateBeforeSave: false });
+
+    res.status(200).json({ success: true, message: 'Email verified successfully.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = {
+  register,
+  login,
+  logout,
+  getMe,
+  updateProfile,
+  changePassword,
+  uploadAvatar,
+  forgotPassword,
+  resetPassword,
+  sendVerification,
+  verifyEmail,
+};

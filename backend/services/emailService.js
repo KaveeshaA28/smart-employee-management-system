@@ -7,13 +7,14 @@
  * - Payslip notifications
  * - Task assignment notifications
  * - Password reset emails
+ * - Email verification
  */
 
 const nodemailer = require('nodemailer');
 
 // ─── Create Transporter ────────────────────────────────────────────────────────
 const createTransporter = () => {
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
     port: parseInt(process.env.EMAIL_PORT) || 587,
     secure: process.env.EMAIL_SECURE === 'true',
@@ -195,15 +196,16 @@ const sendPayslipNotificationEmail = async (employee, payroll) => {
 
 /**
  * Password Reset Email
+ * @param {Object} employee - Employee document
+ * @param {String} resetUrl - Full URL with reset token (built by authController)
  */
-const sendPasswordResetEmail = async (employee, resetToken) => {
-  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+const sendPasswordResetEmail = async (employee, resetUrl) => {
   const content = `
     <h2>Password Reset Request 🔐</h2>
     <p>Hi ${employee.firstName}, we received a request to reset your password.</p>
-    <p>Click the button below to reset your password. This link is valid for <strong>1 hour</strong>.</p>
+    <p>Click the button below to reset your password. This link is valid for <strong>30 minutes</strong>.</p>
     <a href="${resetUrl}" class="btn">Reset Password</a>
-    <p>If you did not request this, please ignore this email.</p>
+    <p>If you did not request this, please ignore this email — your password will remain unchanged.</p>
     <div class="info-box warning">
       <p>⚠️ For security, never share this link with anyone.</p>
     </div>
@@ -215,6 +217,26 @@ const sendPasswordResetEmail = async (employee, resetToken) => {
   });
 };
 
+/**
+ * Email Verification Email
+ * @param {Object} employee - Employee document
+ * @param {String} verifyUrl - Full URL with verification token (built by authController)
+ */
+const sendVerificationEmail = async (employee, verifyUrl) => {
+  const content = `
+    <h2>Verify Your Email Address ✅</h2>
+    <p>Hi ${employee.firstName}, please confirm your email address to activate all features of your account.</p>
+    <p>Click the button below to verify your email. This link is valid for <strong>24 hours</strong>.</p>
+    <a href="${verifyUrl}" class="btn">Verify Email</a>
+    <p>If you did not create this account, please ignore this email.</p>
+  `;
+  return sendEmail({
+    to: employee.email,
+    subject: '✅ Verify Your Email - Smart EMS',
+    html: baseTemplate(content, 'Email Verification'),
+  });
+};
+
 module.exports = {
   sendEmail,
   sendWelcomeEmail,
@@ -222,4 +244,5 @@ module.exports = {
   sendTaskAssignmentEmail,
   sendPayslipNotificationEmail,
   sendPasswordResetEmail,
+  sendVerificationEmail,
 };

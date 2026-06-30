@@ -153,6 +153,15 @@ const EmployeeSchema = new mongoose.Schema(
     resetPasswordToken: String,
     resetPasswordExpire: Date,
 
+    // ─── Email Verification ───────────────────────────────────
+    isEmailVerified: { type: Boolean, default: false },
+    emailVerificationToken: String,
+    emailVerificationExpire: Date,
+
+    // ─── Login Security (Rate Limiting) ───────────────────────
+    loginAttempts: { type: Number, default: 0 },
+    lockUntil: { type: Date, default: null },
+
     isDeleted: { type: Boolean, default: false },
   },
   {
@@ -186,6 +195,40 @@ EmployeeSchema.pre('save', async function (next) {
 // ─── Instance Method: Compare Password ────────────────────────────────────────
 EmployeeSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
+};
+
+// ─── Instance Method: Check if account is locked ──────────────────────────────
+EmployeeSchema.methods.isLocked = function () {
+  return !!(this.lockUntil && this.lockUntil > Date.now());
+};
+
+// ─── Instance Method: Increment failed login attempts ─────────────────────────
+EmployeeSchema.methods.incrementLoginAttempts = async function () {
+  // If a previous lock has expired, reset attempts instead of incrementing forever
+  if (this.lockUntil && this.lockUntil < Date.now()) {
+    return this.updateOne({
+      $set: { loginAttempts: 1 },
+      $unset: { lockUntil: 1 },
+    });
+  }
+
+  const updates = { $inc: { loginAttempts: 1 } };
+  const MAX_ATTEMPTS = 5;
+  const LOCK_TIME = 15 * 60 * 1000; // 15 minutes
+
+  if (this.loginAttempts + 1 >= MAX_ATTEMPTS && !this.isLocked()) {
+    updates.$set = { lockUntil: Date.now() + LOCK_TIME };
+  }
+
+  return this.updateOne(updates);
+};
+
+// ─── Instance Method: Reset login attempts on successful login ────────────────
+EmployeeSchema.methods.resetLoginAttempts = async function () {
+  return this.updateOne({
+    $set: { loginAttempts: 0 },
+    $unset: { lockUntil: 1 },
+  });
 };
 
 // ─── Index for fast querying ───────────────────────────────────────────────────
