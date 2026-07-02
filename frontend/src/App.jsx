@@ -6,6 +6,8 @@ import { Toaster } from 'react-hot-toast';
 // Pages
 import Login        from './pages/Login';
 import Register     from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword  from './pages/ResetPassword';
 import Dashboard    from './pages/Dashboard';
 import Employees    from './pages/Employees';
 import Attendance   from './pages/Attendance';
@@ -54,6 +56,8 @@ function App() {
           {/* Public */}
           <Route path="/login"    element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />} />
           <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" /> : <Register />} />
+          <Route path="/forgot-password" element={isAuthenticated ? <Navigate to="/dashboard" /> : <ForgotPassword />} />
+          <Route path="/reset-password/:token" element={isAuthenticated ? <Navigate to="/dashboard" /> : <ResetPassword />} />
 
           {/* Protected – all roles */}
           <Route path="/dashboard"    element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

@@ -16,7 +16,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check if user is logged in
+    // Check if user is logged in (on app load / refresh)
     const currentUser = authService.getCurrentUser();
     if (currentUser) {
       setUser(currentUser);
@@ -26,9 +26,9 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
+      // response = { success, message, token, expiresIn, data: {...user} }
       const response = await authService.login(email, password);
-      const userData = response?.data?.data || response?.data || response;
-      setUser(userData);
+      setUser(response.data);
       return response;
     } catch (error) {
       console.error('Login error:', error);
@@ -51,12 +51,22 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  // Keep user state in sync if profile is updated elsewhere (e.g. updateProfile)
+  const updateUser = (updatedFields) => {
+    setUser((prev) => {
+      const merged = { ...prev, ...updatedFields };
+      localStorage.setItem('user', JSON.stringify(merged));
+      return merged;
+    });
+  };
+
   const value = {
     user,
     loading,
     login,
     register,
     logout,
+    updateUser,
     isAuthenticated: !!user,
     hasRole: (role) => user?.role === role,
     hasAnyRole: (roles) => roles.includes(user?.role),

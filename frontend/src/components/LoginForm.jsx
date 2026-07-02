@@ -82,6 +82,12 @@ const LoginForm = () => {
             </div>
           </div>
 
+          <div className="flex justify-end -mt-1">
+            <Link to="/forgot-password" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
+              Forgot password?
+            </Link>
+          </div>
+
           <button
             type="submit" disabled={loading}
             className="btn-primary w-full flex items-center justify-center gap-2 mt-2 py-3 text-base"
