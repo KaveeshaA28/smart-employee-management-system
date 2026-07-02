@@ -6,7 +6,7 @@ import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import {
   FiUsers, FiClock, FiCalendar, FiCheckSquare,
-  FiTrendingUp, FiArrowRight, FiLoader, FiAlertCircle,
+  FiTrendingUp, FiAlertCircle,
 } from 'react-icons/fi';
 
 const StatCard = ({ icon: Icon, label, value, color, bg, trend }) => (
@@ -38,25 +38,31 @@ const Dashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [stats, setStats] = useState({ totalEmployees: 0, presentToday: 0, pendingLeaves: 0, tasksPending: 0 });
   const [loading, setLoading] = useState(true);
-  const [recentActivity, setRecentActivity] = useState([]);
+
+  // Get display name from user object (no 'name' field — use firstName/lastName)
+  const displayName = user?.fullName ||
+    `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'User';
+  const firstName = user?.firstName || displayName.split(' ')[0] || 'User';
+
+  const isAdminOrHR = hasRole('Admin') || hasRole('HR');
 
   useEffect(() => { fetchStats(); }, []);
 
   const fetchStats = async () => {
     try {
       setLoading(true);
-      if (hasRole('Admin') || hasRole('HR')) {
+      if (isAdminOrHR) {
         const [empRes, attRes, leaveRes, taskRes] = await Promise.allSettled([
-          apiClient.get('/employees/count'),
-          apiClient.get('/attendance/today-count'),
-          apiClient.get('/leave/pending-count'),
-          apiClient.get('/tasks/pending-count'),
+          apiClient.get('/employees/stats'),
+          apiClient.get('/attendance/today'),
+          apiClient.get('/leave?status=Pending&limit=1'),
+          apiClient.get('/tasks?status=Pending&limit=1'),
         ]);
         setStats({
-          totalEmployees: empRes.value?.data?.count   || 0,
-          presentToday:   attRes.value?.data?.count   || 0,
-          pendingLeaves:  leaveRes.value?.data?.count || 0,
-          tasksPending:   taskRes.value?.data?.count  || 0,
+          totalEmployees: empRes.value?.data?.data?.totalActive   || 0,
+          presentToday:   attRes.value?.data?.data?.present       || 0,
+          pendingLeaves:  leaveRes.value?.data?.total             || 0,
+          tasksPending:   taskRes.value?.data?.total              || 0,
         });
       } else {
         const [taskRes, attRes] = await Promise.allSettled([
@@ -65,9 +71,9 @@ const Dashboard = () => {
         ]);
         setStats({
           totalEmployees: 1,
-          presentToday:   attRes.value?.data?.presentDays || 0,
+          presentToday:   attRes.value?.data?.data?.presentDays   || 0,
           pendingLeaves:  0,
-          tasksPending:   taskRes.value?.data?.count || 0,
+          tasksPending:   taskRes.value?.data?.count              || 0,
         });
       }
     } catch (err) {
@@ -77,39 +83,43 @@ const Dashboard = () => {
     }
   };
 
-  const isAdminOrHR = hasRole('Admin') || hasRole('HR');
-
   const adminStats = [
-    { icon: FiUsers,       label: 'Total Employees', value: stats.totalEmployees, color: 'text-indigo-600', bg: 'bg-indigo-50',  trend: 'Active team members' },
-    { icon: FiClock,       label: 'Present Today',   value: stats.presentToday,   color: 'text-emerald-600',bg: 'bg-emerald-50', trend: 'Checked in today' },
-    { icon: FiCalendar,    label: 'Pending Leaves',  value: stats.pendingLeaves,  color: 'text-amber-600',  bg: 'bg-amber-50',   trend: 'Awaiting approval' },
-    { icon: FiCheckSquare, label: 'Pending Tasks',   value: stats.tasksPending,   color: 'text-violet-600', bg: 'bg-violet-50',  trend: 'In progress' },
+    { icon: FiUsers,       label: 'Total Employees', value: stats.totalEmployees, color: 'text-indigo-600',  bg: 'bg-indigo-50',  trend: 'Active team members' },
+    { icon: FiClock,       label: 'Present Today',   value: stats.presentToday,   color: 'text-emerald-600', bg: 'bg-emerald-50', trend: 'Checked in today' },
+    { icon: FiCalendar,    label: 'Pending Leaves',  value: stats.pendingLeaves,  color: 'text-amber-600',   bg: 'bg-amber-50',   trend: 'Awaiting approval' },
+    { icon: FiCheckSquare, label: 'Pending Tasks',   value: stats.tasksPending,   color: 'text-violet-600',  bg: 'bg-violet-50',  trend: 'In progress' },
   ];
 
   const empStats = [
-    { icon: FiClock,       label: 'Days Present',    value: stats.presentToday,  color: 'text-emerald-600',bg: 'bg-emerald-50' },
-    { icon: FiCheckSquare, label: 'My Pending Tasks',value: stats.tasksPending,  color: 'text-violet-600', bg: 'bg-violet-50' },
-    { icon: FiCalendar,    label: 'Leaves Balance',  value: 12,                  color: 'text-amber-600',  bg: 'bg-amber-50' },
-    { icon: FiUsers,       label: 'Department',      value: user?.department || 'N/A', color: 'text-indigo-600', bg: 'bg-indigo-50' },
+    { icon: FiClock,       label: 'Days Present',     value: stats.presentToday,        color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { icon: FiCheckSquare, label: 'My Pending Tasks', value: stats.tasksPending,         color: 'text-violet-600',  bg: 'bg-violet-50' },
+    { icon: FiCalendar,    label: 'Leave Balance',    value: user?.leaveBalance?.annual ?? 15, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { icon: FiUsers,       label: 'Department',       value: user?.department || 'N/A', color: 'text-indigo-600',  bg: 'bg-indigo-50' },
   ];
 
-  const currentStats = isAdminOrHR ? adminStats : empStats;
-
   const adminActions = [
-    { label: 'Add Employee',     desc: 'Register a new team member',  color: 'bg-indigo-50 border-indigo-100 text-indigo-800', path: '/employees' },
-    { label: 'Mark Attendance',  desc: 'Record today\'s attendance',  color: 'bg-emerald-50 border-emerald-100 text-emerald-800', path: '/attendance' },
-    { label: 'Review Leaves',    desc: 'Approve or reject requests',  color: 'bg-amber-50 border-amber-100 text-amber-800',   path: '/leave' },
-    { label: 'Generate Reports', desc: 'Download PDF reports',        color: 'bg-violet-50 border-violet-100 text-violet-800', path: '/reports' },
+    { label: 'Add Employee',     desc: 'Register a new team member', color: 'bg-indigo-50 border-indigo-100 text-indigo-800',   path: '/employees' },
+    { label: 'Mark Attendance',  desc: "Record today's attendance",  color: 'bg-emerald-50 border-emerald-100 text-emerald-800', path: '/attendance' },
+    { label: 'Review Leaves',    desc: 'Approve or reject requests', color: 'bg-amber-50 border-amber-100 text-amber-800',      path: '/leave' },
+    { label: 'Generate Reports', desc: 'Download PDF reports',       color: 'bg-violet-50 border-violet-100 text-violet-800',   path: '/reports' },
   ];
 
   const empActions = [
-    { label: 'My Tasks',        desc: 'View assigned tasks',          color: 'bg-indigo-50 border-indigo-100 text-indigo-800', path: '/tasks' },
-    { label: 'Mark Attendance', desc: 'Log your attendance today',    color: 'bg-emerald-50 border-emerald-100 text-emerald-800', path: '/attendance' },
-    { label: 'Apply Leave',     desc: 'Submit a leave request',       color: 'bg-amber-50 border-amber-100 text-amber-800',   path: '/leave' },
-    { label: 'My Performance',  desc: 'View performance metrics',     color: 'bg-violet-50 border-violet-100 text-violet-800', path: '/performance' },
+    { label: 'My Tasks',        desc: 'View assigned tasks',       color: 'bg-indigo-50 border-indigo-100 text-indigo-800',   path: '/tasks' },
+    { label: 'Mark Attendance', desc: 'Log your attendance today', color: 'bg-emerald-50 border-emerald-100 text-emerald-800', path: '/attendance' },
+    { label: 'Apply Leave',     desc: 'Submit a leave request',    color: 'bg-amber-50 border-amber-100 text-amber-800',      path: '/leave' },
+    { label: 'My Performance',  desc: 'View performance metrics',  color: 'bg-violet-50 border-violet-100 text-violet-800',   path: '/performance' },
   ];
 
+  const currentStats = isAdminOrHR ? adminStats : empStats;
   const actions = isAdminOrHR ? adminActions : empActions;
+
+  const getGreeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'morning';
+    if (h < 17) return 'afternoon';
+    return 'evening';
+  };
 
   return (
     <div className="page-layout">
@@ -117,13 +127,16 @@ const Dashboard = () => {
       <div className="main-content">
         <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <div className="page-body">
+
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-slate-800">
-              Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'},{' '}
-              <span className="text-indigo-600">{user?.name?.split(' ')[0]}</span>! 👋
+              Good {getGreeting()},{' '}
+              <span className="text-indigo-600">{firstName}</span>! 👋
             </h1>
-            <p className="text-slate-500 mt-1">Here's what's happening in your organization today.</p>
+            <p className="text-slate-500 mt-1">
+              Here's what's happening in your organization today.
+            </p>
           </div>
 
           {/* Stats */}
@@ -137,9 +150,7 @@ const Dashboard = () => {
 
           {/* Quick Actions */}
           <div className="card mb-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold text-slate-800">Quick Actions</h2>
-            </div>
+            <h2 className="text-lg font-bold text-slate-800 mb-5">Quick Actions</h2>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {actions.map((a, i) => (
                 <QuickAction key={i} {...a} onClick={() => navigate(a.path)} />
@@ -177,18 +188,20 @@ const Dashboard = () => {
               </h2>
               <div className="space-y-2">
                 {[
-                  { step: '1', text: 'Add employees via the Employees page', done: true },
-                  { step: '2', text: 'Configure attendance tracking',         done: true },
-                  { step: '3', text: 'Set up payroll for the current month',  done: false },
-                  { step: '4', text: 'Assign tasks to team members',          done: false },
-                  { step: '5', text: 'Review performance reports',            done: false },
+                  { step: '1', text: 'Add employees via the Employees page',   done: true },
+                  { step: '2', text: 'Configure attendance tracking',           done: true },
+                  { step: '3', text: 'Set up payroll for the current month',   done: false },
+                  { step: '4', text: 'Assign tasks to team members',           done: false },
+                  { step: '5', text: 'Review performance reports',             done: false },
                 ].map((s, i) => (
                   <div key={i} className={`flex items-center gap-3 p-3 rounded-xl ${s.done ? 'bg-emerald-50' : 'bg-slate-50'}`}>
                     <div className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0
                       ${s.done ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'}`}>
                       {s.done ? '✓' : s.step}
                     </div>
-                    <p className={`text-sm ${s.done ? 'text-emerald-700 line-through opacity-70' : 'text-slate-700'}`}>{s.text}</p>
+                    <p className={`text-sm ${s.done ? 'text-emerald-700 line-through opacity-70' : 'text-slate-700'}`}>
+                      {s.text}
+                    </p>
                   </div>
                 ))}
               </div>

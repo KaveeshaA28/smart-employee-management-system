@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiMenu, FiBell, FiSearch, FiChevronDown, FiLogOut, FiUser, FiSettings } from 'react-icons/fi';
+import { FiMenu, FiBell, FiSearch, FiChevronDown, FiLogOut, FiUser } from 'react-icons/fi';
 import { useAuth } from '../context/AuthContext';
 
 const Navbar = ({ onMenuClick }) => {
@@ -8,11 +8,19 @@ const Navbar = ({ onMenuClick }) => {
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
-  const handleLogout = () => { logout(); navigate('/login'); };
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  // Helper: get display name from user object
+  const displayName = user?.fullName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'User';
+  const initial = displayName.charAt(0).toUpperCase();
 
   return (
     <nav className="bg-white border-b border-slate-100 sticky top-0 z-20 shadow-sm">
       <div className="flex items-center justify-between px-6 py-3">
+
         {/* Left */}
         <div className="flex items-center gap-4">
           <button onClick={onMenuClick} className="lg:hidden btn-icon">
@@ -46,10 +54,10 @@ const Navbar = ({ onMenuClick }) => {
               className="flex items-center gap-2.5 pl-3 border-l border-slate-100 hover:bg-slate-50 rounded-xl px-3 py-2 transition"
             >
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow">
-                {user?.name?.charAt(0).toUpperCase()}
+                {initial}
               </div>
               <div className="text-left hidden sm:block">
-                <p className="text-sm font-semibold text-slate-800 leading-tight">{user?.name}</p>
+                <p className="text-sm font-semibold text-slate-800 leading-tight">{displayName}</p>
                 <p className="text-xs text-slate-400">{user?.role}</p>
               </div>
               <FiChevronDown size={14} className="text-slate-400" />
@@ -57,6 +65,10 @@ const Navbar = ({ onMenuClick }) => {
 
             {dropdownOpen && (
               <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-50 animate-slide-up">
+                <div className="px-4 py-2 border-b border-slate-100 mb-1">
+                  <p className="text-xs font-semibold text-slate-800">{displayName}</p>
+                  <p className="text-xs text-slate-400">{user?.email}</p>
+                </div>
                 <button
                   onClick={() => { navigate('/profile'); setDropdownOpen(false); }}
                   className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 w-full text-left transition"
